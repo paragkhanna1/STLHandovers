@@ -1,0 +1,117 @@
+#STL-based planner
+Thesis: Automated Control of Human-Robot Handovers using Data-driven STL Modeling of Human-Human Handovers, 2023
+Author: Jonathan Fredberg, jfredb@kth.se
+
+Based on code by Alexis Linard
+
+Python 3.9
+Gurobi 10.0.2, https://www.gurobi.com/
+
+Python packages/ modules:
+pandas, numpy, pulp, operator, matplotlib, sklearn, csv
+
+
+
+Gennerate handover trajectorys based on an STL-model. For full description, see thesis, Section 3.3
+
+
+
+File overview:
+STLGenerateJointHandover.py:	Definition of class generate_signal_problem, containing the optimization problem to generate a handover plan.
+	It is innitiated to build the optimization problem based on an input STL formula, and other settings. It can be updated with new information about location of giver/taker hands using fix_variables(). The optimization problem be solved using generate_path(). The solution can then be retrieved using get_path().
+
+STL.py:		Definition of the STLFormula class used in the planner. Author Alexis Linard.
+	Should not be edited.
+
+tfmatrix.py:	Provides functions to generate Homogenious transformation matrix from map frame to shared frame, and inverse.
+	Should not be edited.
+
+plotRecordedHandover.py:	Provides functions to plot position, velocity and/or acceleration, of giver and taker right hands; including planned trajectories at each time-step.
+	Edit this code to get different plot outputs.
+
+test_handover.py:	Run the handover planner for a single handover from “A multimodal data set of human handovers with design implications for human-robot handovers,” P. Khanna, M. Björkman, and C. Smith, https://github.com/KTH-RPL/handovers_dataset;
+
+test_multiple.py:		Run the handover planner for multiple handovers from "A multimodal data set..."
+
+test_ros_integrated.py:	Integrate planner with ros to run on Baxter...
+
+
+
+
+
+
+How to use test_handover.py:
+Set variables in code. Run the code. One handover will be simulated, according to settings in the code. 
+
+Output is plots in folders "world_frame" and "shared_frame". Output naming convention is "plan_[frame]_[variable][time].png"; ex. "plan_world_frame_pos3.png".
+To edit plots, you need to edit code in "plotRecordedHandover.py"
+	* To choose which plots should be produced; comment or uncomment lines in the function "plot_all_handovers()".
+	* To change file format of plots, change '.png' extension in "plt.savefig()" functions in "plot_all_handovers()"
+
+Most settings are available at the top of the file between "######## SETTINGS ########" and "######## END OF SETTINGS ########"
+
+1. Set ROBOT_ROLE; set if the simulated robot acts as giver or taker in the handover.
+2. Set UPDATE_ROBOT_FROM_PLAN; Choose if the planner receives uppdated robot position from the previous planner output (True), or if the planner receives updated robot position from the recorded handover.
+	* In test_ros_integrated.py (test integrated with ros) this controlls if the planner receives uppdates from the previous planner output, or from sensors. 
+		To update Robot position from planner output:	UPDATE_ROBOT_FROM_PLAN = True
+		To update Robot position from sensors:		UPDATE_ROBOT_FROM_PLAN = False
+		To update Human position from planner output:	UPDATE_HUMAN_FROM_PLAN = True
+		To update Human position from sensors:		UPDATE_HUMAN_FROM_PLAN = False	
+
+3. Set RECORDED_DATA_PATH; set location of a recorded handover from "A multimodal data set..."
+4. Set handover_start_time; should be set to the approximate beginning of the reach-phase in the recorded handover. Through trials -1.2 works for most handovers.
+5. Chose STL formulas to include in model. Setting "STL100", "STL95_100", "STL90_95" to true or false will include or exclude STL-formulas from respective intervals. The actual specifications are entered as lists of strings later in the code.
+5.1 Enter new STL formulas. Marked by "########### BUILD STL-model ############". Variable "STL_list" should contain lists of parameters for each STL-subformula, formated as:
+	[ temporal opperator (string),	lower time bound (float), upper time bound (float), lower variable bound (float), variable (string), upper variable bound (float)]
+	temporal opperators:	"G" -> Allways/Globally opperator
+				"F" -> Eventually opperator
+	Variables:	'giver_x', 'giver_y', 'giver_z', 'giver_dx', 'giver_dy', 'giver_dz', 'giver_ddx',      'giver_ddy', 'giver_ddz', 'taker_x', 'taker_y', 'taker_z', 'taker_dx', 'taker_dy', 'taker_dz', 'taker_ddx',      'taker_ddy', 'taker_ddz',  'relative_x', 'relative_y', 'relative_z', 'relative_dx', 'relative_dy', 'relative_dz', 'relative_ddx', 'relative_ddy', 'relative_ddz'
+	ex.	STL-formula:	Allways[0.20, 0.40] ( -0.10 < taker_x < 0.10 )
+		Parameter list:	["G", 0.20, 0.40, -0.10, 'taker_x', 0.10]
+
+	Replace each list of STL-parameters with results from running learn.py in "02 Extract STL-model". "STL_[interval]_b.log" contain a lists of STL-parameters correctly formated to insert into the code directly.
+
+5.2 It is possible to replace the STL-model with an arbitrary STL-model, that doesn't follow the template formula.
+	The STL-model, variable "phi", should be defined as an STL-model using syntax in STL.py
+
+6. Set "Kshirsagar" settings. See thesis Section 3.2.2.2 for details.
+	KSHIRSAGAR_APPROACH:	Set if the Kshirsagar inspired approach stratergy should be included in the STL-model
+	Kshirsagar_only:	Replace the STL-list with only the Kshirsagar STL-model. (Note, This does not change the cost function to reflect Kshirsagars original controller. Also, it performs poorly.)
+	HARD_KSHIRSAGAR_CONSTRAINT:	Sets a constraint in the optimization problem that Robustness of Kshirsagar inspired STL-model must be positive. Guaranties all solutions include giver-taker hands reach in a valid handover; at the risk of the optimisation problem becoming not-feasable.
+	HARD_STL_CONSTRAINT:	Sets a constraint in the optimisation problem that Robustness of the full STL-model must be positive. Guaranties all solutions satisfy the STL-model; at high risk of making the optimisation problem not-feasable.
+!!!Parameters further down in code. Use ctrl+f to search for them
+	KSHIRSAGAR_DELTA:	Set the expected offset between giver and taker hands at object transfer. Depends on object geometry and where the hands are tracked.
+	KSHIRSAGAR_EPSILON:	A small number. See thesis for details.
+	KSHIRSAGAR_TIME:	Time when the handover should be completed. By default set to the maximum upper time limit in the STL-model.
+
+7. Set sample rate for the controller/ simulation. Default is dt = 0.2 s
+
+
+
+
+
+How to use test_multiple.py:
+This code runns the planner for multiple handovers, outputting statistics a log of measurments on each plan. It functions similarly to test_handover.py; see above for settings.
+
+Locations of handovers to run are set in "Validation_dataset_paths".
+Outputs are .csv tables, with one new row for each handover.
+
+Outputs:
+First_Last_plan_results_1.csv:		Logs statistics on first and last plan generated for each handover.
+Location_error_over_time_O_1.csv:	Logs the location error for predicted handover location, given in shared frame. Columns indicate at what time plans were generated.
+Location_error_over_time_W_1.csv:	Same, given in world frame.
+Max_acc_over_time_1.csv:		Maximum acceleration in a planned handover.
+Max_vel_over_time_1.csv:		Maximum velocity in a planned handover.
+RMSE_over_time_O_1.csv:			Root Mean Square Error between planned path and recorded path. given in shared frame.
+RMSE_over_time_W_1.csv:			Same, given in world frame.
+Time_error_over_time_1.csv:		Error in predicted handover time, for each plan generated.
+
+
+
+
+How to use test_ros_integrated.py:
+This code runns the planner, integrated with ROS. Planner settings are similar to test_handover.py.
+
+
+
+
